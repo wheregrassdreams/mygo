@@ -1,9 +1,13 @@
 package ui
 
 import (
+	"errors"
+
 	"github.com/egoist/mygo/internal/scene"
 	"github.com/egoist/mygo/transfer"
 )
+
+var errNoActiveLocalDrag = errors.New("ui: no active local drag to hand off")
 
 // Elements drag values to others within a window: Drag makes an element
 // the source of a value, which a press moving a few DIPs starts dragging,
@@ -171,21 +175,7 @@ func (rt *engine) dragMove(x, y float32) {
 			if options.Preview == nil {
 				options.Preview, options.Hotspot = rt.dataPreview(s)
 			}
-			done := options.Done
-			options.Done = func(result transfer.Result) {
-				rt.drag = nil
-				if p := rt.pressed; p != nil {
-					p.pressed = false
-					rt.pressed = nil
-				}
-				rt.clearDataOver()
-				if !rt.closed {
-					rt.requestFrame()
-				}
-				if done != nil {
-					done(result)
-				}
-			}
+			options.Done = rt.nativeDragDone(d, options.Done)
 			if err := rt.host.startDataDrag(src.data(), value, options, x*rt.zoomFactor(), y*rt.zoomFactor()); err != nil {
 				options.Done(transfer.Result{Err: err})
 			}
@@ -200,6 +190,50 @@ func (rt *engine) dragMove(x, y float32) {
 	}
 	d.over = rt.valueTarget(x, y, d.value)
 	rt.requestFrame()
+}
+
+// HandoffDataDrag promotes the active in-window drag to a native transfer.
+// Unlike Window.StartDataDrag, it associates the transfer with the existing
+// runtime drag and wraps completion so the pressed source and local drag
+// state are released. local is the optional process-local value offered to
+// typed targets; pass nil when the serialized formats should take precedence.
+// Call it on the UI thread while building a frame after deciding that the
+// pointer has left this window.
+func (c *Context) HandoffDataDrag(data transfer.Data, local any, options transfer.DragOptions) error {
+	rt := c.runtime()
+	if rt == nil || !rt.inFrame {
+		return errNoActiveLocalDrag
+	}
+	d := rt.drag
+	if d == nil || d.native || d.canceled {
+		return errNoActiveLocalDrag
+	}
+	d.native = true
+	options.Done = rt.nativeDragDone(d, options.Done)
+	if err := rt.host.startDataDrag(data, local, options, -1, -1); err != nil {
+		options.Done(transfer.Result{Err: err})
+		return err
+	}
+	return nil
+}
+
+func (rt *engine) nativeDragDone(d *valueDrag, done func(transfer.Result)) func(transfer.Result) {
+	return func(result transfer.Result) {
+		if rt.drag == d {
+			rt.drag = nil
+		}
+		if p := rt.pressed; p != nil && p.id == d.src {
+			p.pressed = false
+			rt.pressed = nil
+		}
+		rt.clearDataOver()
+		if !rt.closed {
+			rt.requestFrame()
+		}
+		if done != nil {
+			done(result)
+		}
+	}
 }
 
 // countedDrag is a value a source drags with how many things it stands
