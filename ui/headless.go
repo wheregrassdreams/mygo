@@ -830,10 +830,17 @@ func (t *Tester) Release(x, y float32) { t.ReleaseButton(0, x, y) }
 // the secondary and 2 the middle, without releasing, as a right-button
 // drag begins; ReleaseButton releases it.
 func (t *Tester) PressButton(button int, x, y float32) {
-	if t.webViewPress(x, y, button, 0) {
+	t.PressWithModifiers(0, button, x, y)
+}
+
+// PressWithModifiers presses (x, y) with the given modifier keys and leaves
+// the pointer down. It is useful for testing modifier-sensitive drags, where
+// the pointer-down modifiers determine the drag's selection semantics.
+func (t *Tester) PressWithModifiers(mods Modifiers, button int, x, y float32) {
+	if t.webViewPress(x, y, button, platform.Modifiers(mods)) {
 		return
 	}
-	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: button})
+	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: button, Mods: platform.Modifiers(mods)})
 }
 
 // ReleaseButton releases the pointer's button at (x, y).
